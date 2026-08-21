@@ -77,11 +77,18 @@ The backend rejects tool names outside the allowlist and invalid arguments. Tool
 
 The project separates **state-machine evidence** from future **live provider/network latency**.
 
-Locally verified in the current artifact:
+### Verified GitHub Actions evidence
+
+Verified on GitHub Actions for the v0.1 implementation:
 
 - **15/15 Python tests passed**
-- **16/16 voice-state/security benchmark cases passed**
-- **0 unsafe tool accepts** in the benchmark
+- deterministic voice-state/security benchmark: **16/16 passed**
+- deterministic benchmark: **0 unsafe tool accepts**
+- Ruff: **passed**
+- TypeScript type-check + Vite production build: **passed**
+- Docker multi-stage production image build: **passed**
+
+The frontend gate compiled the pinned Agents SDK/TypeScript/Vite stack and produced a production bundle successfully. Vite reported a non-blocking chunk-size optimization warning for the main bundle; it did not fail the build.
 
 The synthetic latency fixture checks exact event accounting across 10 turns:
 
@@ -91,7 +98,9 @@ The synthetic latency fixture checks exact event accounting across 10 turns:
 
 These values are deliberately labeled as **synthetic state-machine fixtures**. They prove the measurement logic records the expected values; they are not claims about GPT-Realtime or internet latency.
 
-Run:
+No paid live Realtime request is used by the regression suite or CI.
+
+Run the deterministic gates locally:
 
 ```bash
 python -m pytest -q
@@ -100,7 +109,7 @@ python scripts/benchmark_voice_state.py
 
 ## CI gates
 
-GitHub Actions is configured to run:
+GitHub Actions independently verifies:
 
 1. Ruff
 2. Python tests

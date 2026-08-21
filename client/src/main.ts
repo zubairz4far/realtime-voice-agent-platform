@@ -1,0 +1,211 @@
+import { RealtimeAgent, RealtimeSession, tool } from '@openai/agents/realtime';
+import { z } from 'zod';
+import './style.css';
+
+type Bootstrap = {
+  session_id: string;
+  session_token: string;
+  session_token_expires_at: number;
+  realtime_client_secret: string;
+  realtime_model: string;
+  demo_mode: boolean;
+};
+
+type Summary = {
+  interruptions: number;
+  mean_turn_latency_ms: number | null;
+};
+
+const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? window.location.origin;
+const statusEl = document.querySelector<HTMLElement>('#status')!;
+const modelEl = document.querySelector<HTMLElement>('#model')!;
+const latencyEl = document.querySelector<HTMLElement>('#latency')!;
+const interruptionsEl = document.querySelector<HTMLElement>('#interruptions')!;
+const historyEl = document.querySelector<HTMLElement>('#history')!;
+const connectButton = document.querySelector<HTMLButtonElement>('#connect')!;
+const muteButton = document.querySelector<HTMLButtonElement>('#mute')!;
+const interruptButton = document.querySelector<HTMLButtonElement>('#interrupt')!;
+const disconnectButton = document.querySelector<HTMLButtonElement>('#disconnect')!;
+const textForm = document.querySelector<HTMLFormElement>('#text-form')!;
+const textInput = document.querySelector<HTMLInputElement>('#text-input')!;
+
+let bootstrap: Bootstrap | null = null;
+let session: RealtimeSession | null = null;
+let muted = false;
+
+async function backend<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  headers.set('content-type', 'application/json');
+  if (bootstrap) headers.set('authorization', `Bearer ${bootstrap.session_token}`);
+  const response = await fetch(`${apiBase}${path}`, { ...init, headers });
+  if (!response.ok) throw new Error(`${path} failed (${response.status})`);
+  return response.json() as Promise<T>;
+}
+
+async function telemetry(event: string, callId?: string): Promise<void> {
+  if (!bootstrap) return;
+  try {
+    const summary = await backend<Summary>('/v1/telemetry/event', {
+      method: 'POST',
+      body: JSON.stringify({
+        event,
+        client_monotonic_ms: performance.now(),
+        call_id: callId ?? null,
+      }),
+    });
+    latencyEl.textContent = summary.mean_turn_latency_ms == null
+      ? '—'
+      : `${Math.round(summary.mean_turn_latency_ms)} ms`;
+    interruptionsEl.textContent = String(summary.interruptions);
+  } catch (error) {
+    console.warn('telemetry failed', error);
+  }
+}
+
+async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
+  const callId = crypto.randomUUID();
+  const response = await backend<{
+    ok: boolean;
+    result?: Record<string, unknown>;
+    error?: string;
+  }>('/v1/tools/execute', {
+    method: 'POST',
+    body: JSON.stringify({ call_id: callId, name, arguments: args }),
+  });
+  return JSON.stringify(response.ok ? response.result : { error: response.error });
+}
+
+const lookupOrder = tool({
+  name: 'lookup_order',
+  description: 'Look up shipping status for an order after the user gives an order ID.',
+  parameters: z.object({ order_id: z.string().regex(/^ORD-[0-9]{6}$/) }),
+  async execute({ order_id }) {
+    return executeTool('lookup_order', { order_id });
+  },
+});
+
+const scheduleCallback = tool({
+  name: 'schedule_callback',
+  description: 'Schedule a support callback only after confirming customer ID and time window.',
+  parameters: z.object({
+    customer_id: z.string().regex(/^CUS-[0-9]{6}$/),
+    preferred_window: z.enum(['morning', 'afternoon', 'evening']),
+  }),
+  async execute({ customer_id, preferred_window }) {
+    return executeTool('schedule_callback', { customer_id, preferred_window });
+  },
+});
+
+function renderHistory(items: unknown[]): void {
+  const html = items.slice(-12).map((raw) => {
+    const item = raw as Record<string, unknown>;
+    const role = typeof item.role === 'string' ? item.role : String(item.type ?? 'event');
+    let text = '';
+    if (typeof item.transcript === 'string') text = item.transcript;
+    else if (typeof item.text === 'string') text = item.text;
+    else if (Array.isArray(item.content)) {
+      text = item.content.map((part) => {
+        const record = part as Record<string, unknown>;
+        return String(record.transcript ?? record.text ?? '');
+      }).filter(Boolean).join(' ');
+    }
+    if (!text) text = role.includes('tool') ? '[tool event]' : '[audio / event]';
+    return `<div class="turn"><div class="role">${escapeHtml(role)}</div><div class="text">${escapeHtml(text)}</div></div>`;
+  }).join('');
+  historyEl.innerHTML = html || '<p class="muted">No turns yet.</p>';
+  historyEl.scrollTop = historyEl.scrollHeight;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[char]!);
+}
+
+function setConnected(connected: boolean): void {
+  connectButton.disabled = connected;
+  muteButton.disabled = !connected;
+  interruptButton.disabled = !connected;
+  disconnectButton.disabled = !connected;
+}
+
+async function connect(): Promise<void> {
+  statusEl.textContent = 'Bootstrapping…';
+  bootstrap = await backend<Bootstrap>('/v1/realtime/bootstrap', { method: 'POST', body: '{}' });
+  modelEl.textContent = bootstrap.realtime_model;
+
+  if (bootstrap.demo_mode) {
+    statusEl.textContent = 'Demo backend ready — live audio disabled';
+    historyEl.innerHTML = '<p class="muted">Set DEMO_MODE=false and configure OPENAI_API_KEY for a live WebRTC session.</p>';
+    return;
+  }
+
+  const agent = new RealtimeAgent({
+    name: 'Voice Support Agent',
+    instructions: 'Be concise. Use tools only when their required identifiers are confirmed. Never invent tool results.',
+    tools: [lookupOrder, scheduleCallback],
+  });
+
+  session = new RealtimeSession(agent, {
+    model: bootstrap.realtime_model,
+    config: {
+      outputModalities: ['audio'],
+      parallelToolCalls: true,
+      audio: {
+        input: {
+          turnDetection: { type: 'semantic_vad', eagerness: 'high' },
+        },
+      },
+    },
+  });
+
+  session.on('audio_start', () => { void telemetry('assistant_audio_started'); });
+  session.on('audio_stopped', () => { void telemetry('assistant_audio_stopped'); });
+  session.on('audio_interrupted', () => { void telemetry('assistant_interrupted'); });
+  session.on('history_updated', (history) => renderHistory(history as unknown[]));
+  session.on('transport_event', (event) => {
+    const raw = event as unknown as Record<string, unknown>;
+    if (raw.type === 'input_audio_buffer.speech_started') void telemetry('user_speech_started');
+    if (raw.type === 'input_audio_buffer.speech_stopped') void telemetry('user_speech_stopped');
+  });
+  session.on('error', (error) => {
+    console.error(error);
+    statusEl.textContent = 'Error';
+  });
+
+  await session.connect({ apiKey: bootstrap.realtime_client_secret });
+  await telemetry('session_connected');
+  statusEl.textContent = 'Connected';
+  setConnected(true);
+}
+
+connectButton.addEventListener('click', () => {
+  void connect().catch((error) => {
+    console.error(error);
+    statusEl.textContent = 'Connection failed';
+  });
+});
+
+muteButton.addEventListener('click', () => {
+  if (!session) return;
+  muted = !muted;
+  session.mute(muted);
+  muteButton.textContent = muted ? 'Unmute' : 'Mute';
+});
+
+interruptButton.addEventListener('click', () => session?.interrupt());
+
+disconnectButton.addEventListener('click', () => {
+  session?.close();
+  session = null;
+  statusEl.textContent = 'Disconnected';
+  setConnected(false);
+});
+
+textForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const value = textInput.value.trim();
+  if (!value || !session) return;
+  session.sendMessage(value);
+  textInput.value = '';
+});

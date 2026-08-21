@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Realtime Voice Agent Platform</title>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">PRODUCTION VOICE AI</p>
+        <h1>Realtime Voice Agent</h1>
+        <p class="sub">WebRTC speech-to-speech, barge-in interruption, secure backend tools, and measured turn latency.</p>
+      </section>
+
+      <section class="panel status-panel">
+        <div><span class="label">Status</span><strong id="status">Disconnected</strong></div>
+        <div><span class="label">Model</span><strong id="model">—</strong></div>
+        <div><span class="label">Turn latency</span><strong id="latency">—</strong></div>
+        <div><span class="label">Interruptions</span><strong id="interruptions">0</strong></div>
+      </section>
+
+      <section class="controls panel">
+        <button id="connect">Connect microphone</button>
+        <button id="mute" disabled>Mute</button>
+        <button id="interrupt" disabled>Stop agent</button>
+        <button id="disconnect" disabled>Disconnect</button>
+      </section>
+
+      <section class="panel">
+        <h2>Conversation</h2>
+        <div id="history" class="history"><p class="muted">Connect to begin.</p></div>
+        <form id="text-form" class="text-form">
+          <input id="text-input" placeholder="Optional typed message…" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <section class="panel notes">
+        <h2>Safety boundary</h2>
+        <p>The browser receives only a short-lived Realtime credential. Tool calls go back through the backend using a separate signed session token. Long-lived provider credentials never enter browser JavaScript.</p>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
