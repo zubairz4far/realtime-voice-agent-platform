@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]" ruff
+      - run: ruff check server scripts
+      - run: pytest -q
+      - run: python scripts/benchmark_voice_state.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - working-directory: client
+        run: npm install --no-audit --no-fund
+      - working-directory: client
+        run: npm run build
+      - run: docker build -t realtime-voice-agent-platform:test .
