@@ -10,7 +10,13 @@ from fastapi.staticfiles import StaticFiles
 
 from server.app.auth import SessionTokenError, issue_session_token, verify_session_token
 from server.app.config import Settings
-from server.app.models import LatencyEvent, SessionBootstrap, SessionSummary, ToolCallRequest, ToolCallResponse
+from server.app.models import (
+    LatencyEvent,
+    SessionBootstrap,
+    SessionSummary,
+    ToolCallRequest,
+    ToolCallResponse,
+)
 from server.app.realtime import RealtimeCredentialError, create_realtime_client_secret
 from server.app.state import SessionRegistry, SlidingWindowLimiter
 from server.app.tools import ToolExecutor
