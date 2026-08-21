@@ -37,7 +37,10 @@ class SessionRegistry:
                 state.interruptions += 1
             elif event.event == "user_speech_stopped":
                 state.pending_user_stop_ms = event.client_monotonic_ms
-            elif event.event == "assistant_audio_started" and state.pending_user_stop_ms is not None:
+            elif (
+                event.event == "assistant_audio_started"
+                and state.pending_user_stop_ms is not None
+            ):
                 delta = event.client_monotonic_ms - state.pending_user_stop_ms
                 if 0 <= delta <= 60_000:
                     state.turn_latencies_ms.append(delta)
