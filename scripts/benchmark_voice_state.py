@@ -9,9 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from server.app.models import LatencyEvent
-from server.app.state import SessionRegistry
-from server.app.tools import ToolExecutor
+from server.app.models import LatencyEvent  # noqa: E402
+from server.app.state import SessionRegistry  # noqa: E402
+from server.app.tools import ToolExecutor  # noqa: E402
 
 
 def main() -> int:
