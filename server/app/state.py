@@ -9,6 +9,21 @@ from time import monotonic
 from server.app.models import LatencyEvent, SessionSummary, ToolCallResponse
 
 
+def _percentile(values: list[float], percentile: float) -> float | None:
+    """Return a linearly interpolated percentile for deterministic benchmark reporting."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+
+    rank = (len(ordered) - 1) * percentile
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = rank - lower
+    return float(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
+
+
 @dataclass
 class SessionState:
     events: list[LatencyEvent] = field(default_factory=list)
@@ -37,10 +52,7 @@ class SessionRegistry:
                 state.interruptions += 1
             elif event.event == "user_speech_stopped":
                 state.pending_user_stop_ms = event.client_monotonic_ms
-            elif (
-                event.event == "assistant_audio_started"
-                and state.pending_user_stop_ms is not None
-            ):
+            elif event.event == "assistant_audio_started" and state.pending_user_stop_ms is not None:
                 delta = event.client_monotonic_ms - state.pending_user_stop_ms
                 if 0 <= delta <= 60_000:
                     state.turn_latencies_ms.append(delta)
@@ -69,8 +81,15 @@ class SessionRegistry:
                 interruptions=state.interruptions,
                 tool_calls=state.tool_calls,
                 completed_tool_calls=state.completed_tool_calls,
+                turn_samples=len(state.turn_latencies_ms),
                 turn_latencies_ms=list(state.turn_latencies_ms),
                 mean_turn_latency_ms=mean,
+                p50_turn_latency_ms=(
+                    float(statistics.median(state.turn_latencies_ms))
+                    if state.turn_latencies_ms
+                    else None
+                ),
+                p95_turn_latency_ms=_percentile(state.turn_latencies_ms, 0.95),
             )
 
 
