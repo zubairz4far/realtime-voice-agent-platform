@@ -49,5 +49,8 @@ class SessionSummary(BaseModel):
     interruptions: int
     tool_calls: int
     completed_tool_calls: int
+    turn_samples: int
     turn_latencies_ms: list[float]
     mean_turn_latency_ms: float | None
+    p50_turn_latency_ms: float | None
+    p95_turn_latency_ms: float | None

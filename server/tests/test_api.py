@@ -76,4 +76,7 @@ def test_latency_summary_records_interruption_and_turn_latency():
     summary = client.get("/v1/telemetry/summary", headers=headers)
     assert summary.status_code == 200
     assert summary.json()["turn_latencies_ms"] == [225.0]
+    assert summary.json()["turn_samples"] == 1
+    assert summary.json()["p50_turn_latency_ms"] == 225.0
+    assert summary.json()["p95_turn_latency_ms"] == 225.0
     assert summary.json()["interruptions"] == 1

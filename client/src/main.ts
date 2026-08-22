@@ -12,26 +12,37 @@ type Bootstrap = {
 };
 
 type Summary = {
+  session_id: string;
   interruptions: number;
+  turn_samples: number;
+  turn_latencies_ms: number[];
   mean_turn_latency_ms: number | null;
+  p50_turn_latency_ms: number | null;
+  p95_turn_latency_ms: number | null;
 };
 
 const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? window.location.origin;
 const statusEl = document.querySelector<HTMLElement>('#status')!;
 const modelEl = document.querySelector<HTMLElement>('#model')!;
 const latencyEl = document.querySelector<HTMLElement>('#latency')!;
+const p50LatencyEl = document.querySelector<HTMLElement>('#p50-latency')!;
+const p95LatencyEl = document.querySelector<HTMLElement>('#p95-latency')!;
+const turnSamplesEl = document.querySelector<HTMLElement>('#turn-samples')!;
 const interruptionsEl = document.querySelector<HTMLElement>('#interruptions')!;
 const historyEl = document.querySelector<HTMLElement>('#history')!;
 const connectButton = document.querySelector<HTMLButtonElement>('#connect')!;
 const muteButton = document.querySelector<HTMLButtonElement>('#mute')!;
 const interruptButton = document.querySelector<HTMLButtonElement>('#interrupt')!;
 const disconnectButton = document.querySelector<HTMLButtonElement>('#disconnect')!;
+const exportBenchmarkButton = document.querySelector<HTMLButtonElement>('#export-benchmark')!;
 const textForm = document.querySelector<HTMLFormElement>('#text-form')!;
 const textInput = document.querySelector<HTMLInputElement>('#text-input')!;
 
 let bootstrap: Bootstrap | null = null;
 let session: RealtimeSession | null = null;
 let muted = false;
+let latestSummary: Summary | null = null;
+let telemetryQueue: Promise<void> = Promise.resolve();
 
 async function backend<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -42,24 +53,42 @@ async function backend<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function telemetry(event: string, callId?: string): Promise<void> {
+async function telemetry(
+  event: string,
+  callId?: string,
+  clientMonotonicMs: number = performance.now(),
+): Promise<void> {
   if (!bootstrap) return;
   try {
     const summary = await backend<Summary>('/v1/telemetry/event', {
       method: 'POST',
       body: JSON.stringify({
         event,
-        client_monotonic_ms: performance.now(),
+        client_monotonic_ms: clientMonotonicMs,
         call_id: callId ?? null,
       }),
     });
+    latestSummary = summary;
     latencyEl.textContent = summary.mean_turn_latency_ms == null
       ? '—'
       : `${Math.round(summary.mean_turn_latency_ms)} ms`;
+    p50LatencyEl.textContent = summary.p50_turn_latency_ms == null
+      ? '—'
+      : `${Math.round(summary.p50_turn_latency_ms)} ms`;
+    p95LatencyEl.textContent = summary.p95_turn_latency_ms == null
+      ? '—'
+      : `${Math.round(summary.p95_turn_latency_ms)} ms`;
+    turnSamplesEl.textContent = String(summary.turn_samples);
     interruptionsEl.textContent = String(summary.interruptions);
+    exportBenchmarkButton.disabled = summary.turn_samples === 0;
   } catch (error) {
     console.warn('telemetry failed', error);
   }
+}
+
+function queueTelemetry(event: string, callId?: string): void {
+  const capturedAt = performance.now();
+  telemetryQueue = telemetryQueue.then(() => telemetry(event, callId, capturedAt));
 }
 
 async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
@@ -131,7 +160,16 @@ function setConnected(connected: boolean): void {
 
 async function connect(): Promise<void> {
   statusEl.textContent = 'Bootstrapping…';
+  await telemetryQueue;
+  telemetryQueue = Promise.resolve();
   bootstrap = await backend<Bootstrap>('/v1/realtime/bootstrap', { method: 'POST', body: '{}' });
+  latestSummary = null;
+  latencyEl.textContent = '—';
+  p50LatencyEl.textContent = '—';
+  p95LatencyEl.textContent = '—';
+  turnSamplesEl.textContent = '0';
+  interruptionsEl.textContent = '0';
+  exportBenchmarkButton.disabled = true;
   modelEl.textContent = bootstrap.realtime_model;
 
   if (bootstrap.demo_mode) {
@@ -159,14 +197,14 @@ async function connect(): Promise<void> {
     },
   });
 
-  session.on('audio_start', () => { void telemetry('assistant_audio_started'); });
-  session.on('audio_stopped', () => { void telemetry('assistant_audio_stopped'); });
-  session.on('audio_interrupted', () => { void telemetry('assistant_interrupted'); });
+  session.on('audio_start', () => { queueTelemetry('assistant_audio_started'); });
+  session.on('audio_stopped', () => { queueTelemetry('assistant_audio_stopped'); });
+  session.on('audio_interrupted', () => { queueTelemetry('assistant_interrupted'); });
   session.on('history_updated', (history) => renderHistory(history as unknown[]));
   session.on('transport_event', (event) => {
     const raw = event as unknown as Record<string, unknown>;
-    if (raw.type === 'input_audio_buffer.speech_started') void telemetry('user_speech_started');
-    if (raw.type === 'input_audio_buffer.speech_stopped') void telemetry('user_speech_stopped');
+    if (raw.type === 'input_audio_buffer.speech_started') queueTelemetry('user_speech_started');
+    if (raw.type === 'input_audio_buffer.speech_stopped') queueTelemetry('user_speech_stopped');
   });
   session.on('error', (error) => {
     console.error(error);
@@ -200,6 +238,30 @@ disconnectButton.addEventListener('click', () => {
   session = null;
   statusEl.textContent = 'Disconnected';
   setConnected(false);
+});
+
+exportBenchmarkButton.addEventListener('click', () => {
+  if (!bootstrap || !latestSummary || latestSummary.turn_samples === 0) return;
+  const report = {
+    benchmark: 'live_webrtc_user_stop_to_first_assistant_audio',
+    captured_at: new Date().toISOString(),
+    model: bootstrap.realtime_model,
+    session_id: bootstrap.session_id,
+    measurement: {
+      start_event: 'user_speech_stopped',
+      end_event: 'assistant_audio_started',
+      clock: 'browser performance.now()',
+      percentile_method: 'linear interpolation over sorted samples',
+    },
+    metrics: latestSummary,
+  };
+  const blob = new Blob([`${JSON.stringify(report, null, 2)}\n`], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `voice-latency-benchmark-${Date.now()}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
 });
 
 textForm.addEventListener('submit', (event) => {
