@@ -22,4 +22,6 @@ button:disabled { opacity: .35; cursor: default; }
 .text-form { display: flex; gap: 10px; margin-top: 14px; }
 .text-form input { flex: 1; min-width: 0; background: #0c1017; color: #fff; border: 1px solid #2b3342; border-radius: 10px; padding: 11px 13px; font: inherit; }
 .notes p { color: #aab3c2; line-height: 1.55; }
+.benchmark-note p { color: #aab3c2; line-height: 1.55; }
+.benchmark-note code { color: #e6ebf7; }
 @media (max-width: 700px) { .status-panel { grid-template-columns: repeat(2, 1fr); } .shell { padding-top: 28px; } }
