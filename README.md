@@ -52,6 +52,9 @@ transport/audio events -> latency registry -> turn latency + interruption summar
 - conversation-history rendering
 - assistant audio start/stop instrumentation
 - raw speech-start/speech-stop transport instrumentation
+- ordered telemetry delivery with timestamps captured at browser event receipt
+- live turn-latency dashboard with mean, p50, p95, and measured-turn count
+- one-click raw benchmark JSON export
 
 ### Credential boundary
 
@@ -75,7 +78,7 @@ The backend rejects tool names outside the allowlist and invalid arguments. Tool
 
 ## Evaluation
 
-The project separates **state-machine evidence** from future **live provider/network latency**.
+The project separates **state-machine evidence** from **live provider/network latency**.
 
 ### Verified GitHub Actions evidence
 
@@ -97,6 +100,12 @@ The synthetic latency fixture checks exact event accounting across 10 turns:
 - p95 fixture value: **720 ms**
 
 These values are deliberately labeled as **synthetic state-machine fixtures**. They prove the measurement logic records the expected values; they are not claims about GPT-Realtime or internet latency.
+
+### Live WebRTC benchmark path
+
+The browser now records raw `user_speech_stopped -> assistant_audio_started` samples and the backend reports mean, p50, p95, and sample count. Event timestamps are captured immediately in the browser while telemetry delivery is serialized so HTTP request reordering cannot corrupt turn order.
+
+Use [`docs/LIVE_BENCHMARK.md`](docs/LIVE_BENCHMARK.md) for the controlled >=20-turn protocol and export the raw benchmark JSON from the browser UI. No live-provider latency number is claimed until an actual WebRTC session is run and the exported evidence is preserved.
 
 No paid live Realtime request is used by the regression suite or CI.
 
@@ -194,7 +203,7 @@ It demonstrates a different engineering problem from text agents/RAG:
 
 ## Next milestones
 
-1. run a controlled live WebRTC latency benchmark and record p50/p95 user-stop -> first-assistant-audio
+1. run the prepared controlled live WebRTC protocol and preserve a >=20-turn p50/p95 JSON artifact
 2. add scripted Realtime SDK tests for interruption and tool-call workflows
 3. add a server-side reasoning-agent delegation tool for complex requests
 4. add SIP/Twilio telephony transport
