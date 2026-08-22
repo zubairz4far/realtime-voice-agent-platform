@@ -1,5 +1,10 @@
 import { RealtimeAgent, RealtimeSession, tool } from '@openai/agents/realtime';
 import { z } from 'zod';
+import {
+  bindRealtimeWorkflowEvents,
+  createBackendToolExecutor,
+  type RealtimeEventSource,
+} from './realtime_workflows';
 import './style.css';
 
 type Bootstrap = {
@@ -91,18 +96,7 @@ function queueTelemetry(event: string, callId?: string): void {
   telemetryQueue = telemetryQueue.then(() => telemetry(event, callId, capturedAt));
 }
 
-async function executeTool(name: string, args: Record<string, unknown>): Promise<string> {
-  const callId = crypto.randomUUID();
-  const response = await backend<{
-    ok: boolean;
-    result?: Record<string, unknown>;
-    error?: string;
-  }>('/v1/tools/execute', {
-    method: 'POST',
-    body: JSON.stringify({ call_id: callId, name, arguments: args }),
-  });
-  return JSON.stringify(response.ok ? response.result : { error: response.error });
-}
+const executeTool = createBackendToolExecutor(backend);
 
 const lookupOrder = tool({
   name: 'lookup_order',
@@ -197,18 +191,13 @@ async function connect(): Promise<void> {
     },
   });
 
-  session.on('audio_start', () => { queueTelemetry('assistant_audio_started'); });
-  session.on('audio_stopped', () => { queueTelemetry('assistant_audio_stopped'); });
-  session.on('audio_interrupted', () => { queueTelemetry('assistant_interrupted'); });
-  session.on('history_updated', (history) => renderHistory(history as unknown[]));
-  session.on('transport_event', (event) => {
-    const raw = event as unknown as Record<string, unknown>;
-    if (raw.type === 'input_audio_buffer.speech_started') queueTelemetry('user_speech_started');
-    if (raw.type === 'input_audio_buffer.speech_stopped') queueTelemetry('user_speech_stopped');
-  });
-  session.on('error', (error) => {
-    console.error(error);
-    statusEl.textContent = 'Error';
+  bindRealtimeWorkflowEvents(session as unknown as RealtimeEventSource, {
+    queueTelemetry,
+    renderHistory,
+    onError: (error) => {
+      console.error(error);
+      statusEl.textContent = 'Error';
+    },
   });
 
   await session.connect({ apiKey: bootstrap.realtime_client_secret });
