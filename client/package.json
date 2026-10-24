@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@openai/agents": "0.17.0",
+    "@openai/agents": "0.21.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
